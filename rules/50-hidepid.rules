@@ -1,0 +1,48 @@
+polkit.addRule(function(action, subject) {
+    const systemdActions = new Set([
+        "org.freedesktop.systemd1.manage-units",
+        "org.freedesktop.systemd1.list-units",
+        "org.freedesktop.systemd1.Manager.ListUnits",
+        "org.freedesktop.systemd1.Manager.ListUnitsByPatterns",
+        "org.freedesktop.systemd1.Manager.GetCgroupProcesses",  // Block cgroup process queries
+        "org.freedesktop.systemd1.Manager.GetCgroup"  // Block cgroup path queries
+    ]);
+
+    const systemdVerbs = new Set([
+        "GetUnitProcesses", "MainPID", "GetProcesses",
+        "GetUnit", "GetService", "GetUnitByPID",
+        "ListUnitFiles", "GetDynamicUsers", "GetInvocationID"
+    ]);
+
+    const login1Verbs = new Set([
+        "ListSessions", "ListUsers", "GetSession",
+        "GetUser", "GetSeat", "GetSessionByPID",
+        "GetUserByPID", "GetSeatBySession"
+    ]);
+
+    const consoleKitVerbs = new Set([
+        "GetSessions", "GetSessionForUnixProcess", "GetUserForSession"
+    ]);
+
+    // Block systemd unit listing unless user is "adminuser" or in "trusted" group
+    if (systemdActions.has(action.id)) {
+        return (subject.user === "adminuser" || subject.isInGroup("trusted"))
+            ? polkit.Result.YES
+            : polkit.Result.NO;
+    }
+
+    // Block specific systemd process-related queries
+    if (action.id === "org.freedesktop.systemd1.manage-units" &&
+        systemdVerbs.has(action.lookup("verb"))) {
+        return subject.isInGroup("trusted") ? polkit.Result.YES : polkit.Result.NO;
+    }
+
+    // Block login1 and ConsoleKit queries (user/session info leaks)
+    if ((action.id.startsWith("org.freedesktop.login1.") && login1Verbs.has(action.lookup("verb"))) ||
+        (action.id.startsWith("org.freedesktop.ConsoleKit.") && consoleKitVerbs.has(action.lookup("verb")))) {
+        return polkit.Result.NO;
+    }
+
+    // Explicitly deny everything else
+    return polkit.Result.NO;
+});
